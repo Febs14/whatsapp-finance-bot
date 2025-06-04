@@ -5,33 +5,63 @@ const sheets = new (require('./sheets'))();
 const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const path = require('path');
-const { MessageMedia } = require('whatsapp-web.js');
 
-// SOLUSI 1: Terima client sebagai parameter
-async function handleMessage(client, message) {
+// Menggunakan Baileys untuk mengirim pesan
+async function handleMessage(sock, message) {
     try {
-        if (message.from.includes('@g.us') || message.from.includes('@broadcast')) return;
+        // Skip group messages dan broadcast
+        if (message.key.remoteJid.includes('@g.us') || message.key.remoteJid.includes('@broadcast')) return;
 
-        const text = message.body.trim();
-        if (text.startsWith('/')) {
-            await handleCommand(client, message); // Sekarang client sudah tersedia
+        // Ambil teks dari pesan
+        const text = message.message?.conversation || 
+                    message.message?.extendedTextMessage?.text || '';
+        
+        if (!text) return;
+
+        const trimmedText = text.trim();
+        
+        if (trimmedText.startsWith('/')) {
+            await handleCommand(sock, message);
             return;
         }
-        if (text.length < 5) return;
+        
+        if (trimmedText.length < 5) return;
 
-        const parsed = nlp.parseMessage(text);
+        const parsed = nlp.parseMessage(trimmedText);
         if (parsed.confidence >= 25 && parsed.amount) {
-            await processTransaction(message, parsed);
+            await processTransaction(sock, message, parsed);
         } else if (parsed.amount) {
-            await askConfirmation(message, parsed);
+            await askConfirmation(sock, message, parsed);
         }
     } catch (err) {
         console.error('❌ Error handling message:', err);
-        await message.reply('❌ Maaf, ada error. Coba lagi ya!');
+        await sendMessage(sock, message.key.remoteJid, '❌ Maaf, ada error. Coba lagi ya!');
     }
 }
 
-async function processTransaction(message, data) {
+// Helper function untuk mengirim pesan dengan Baileys
+async function sendMessage(sock, jid, text) {
+    try {
+        await sock.sendMessage(jid, { text: text });
+    } catch (error) {
+        console.error('❌ Error sending message:', error);
+    }
+}
+
+// Helper function untuk reply pesan
+async function replyMessage(sock, message, text) {
+    try {
+        await sock.sendMessage(message.key.remoteJid, { 
+            text: text 
+        }, { 
+            quoted: message 
+        });
+    } catch (error) {
+        console.error('❌ Error replying message:', error);
+    }
+}
+
+async function processTransaction(sock, message, data) {
     try {
         console.log('📝 Processing transaction:', data);
 
@@ -68,7 +98,7 @@ async function processTransaction(message, data) {
                 reply += `\n💳 ${data.source}: Rp ${sourceSaldo.toLocaleString('id-ID')},-`;
             }
 
-            await message.reply(reply);
+            await replyMessage(sock, message, reply);
         } else {
             let errorReply = '❌ *Gagal menyimpan transaksi*\n\n';
             errorReply += '🔍 **Data yang dideteksi:**\n';
@@ -83,7 +113,7 @@ async function processTransaction(message, data) {
             errorReply += '• Kredensial Google tidak valid\n\n';
             errorReply += 'Ketik */test* untuk cek status koneksi';
 
-            await message.reply(errorReply);
+            await replyMessage(sock, message, errorReply);
         }
     } catch (error) {
         console.error('❌ Error processing transaction:', error);
@@ -92,11 +122,11 @@ async function processTransaction(message, data) {
         errorMsg += `🐛 Error: ${error.message}\n\n`;
         errorMsg += 'Coba lagi dalam beberapa saat atau hubungi admin jika masalah berlanjut.';
 
-        await message.reply(errorMsg);
+        await replyMessage(sock, message, errorMsg);
     }
 }
 
-async function askConfirmation(message, data) {
+async function askConfirmation(sock, message, data) {
     try {
         let confirmText = `🤔 *Konfirmasi Transaksi*\n\n`;
         confirmText += `Jenis: ${data.type}\n`;
@@ -107,32 +137,34 @@ async function askConfirmation(message, data) {
         confirmText += `📊 Confidence: ${data.confidence}%\n\n`;
         confirmText += `Balas *"ya"* untuk simpan atau koreksi yang salah`;
 
-        await message.reply(confirmText);
+        await replyMessage(sock, message, confirmText);
     } catch (error) {
         console.error('❌ Error confirmation:', error);
     }
 }
 
-async function handleCommand(client, message) {
-    const cmd = message.body.toLowerCase().trim();
+async function handleCommand(sock, message) {
+    const text = message.message?.conversation || 
+                message.message?.extendedTextMessage?.text || '';
+    const cmd = text.toLowerCase().trim();
 
     try {
         if (cmd.startsWith('/rekap')) {
             try {
-                const parts = message.body.split(' ');
+                const parts = text.split(' ');
                 const periode = parts[1] || '';
                 const filterType = parts[2] || '';
 
                 const transaksi = await sheets.rekapTransaksiData(periode, filterType);
 
                 if (transaksi.length === 0) {
-                    await message.reply(`📅 Tidak ada data untuk ${periode} ${filterType ? `(${filterType})` : ''}`);
+                    await replyMessage(sock, message, `📅 Tidak ada data untuk ${periode} ${filterType ? `(${filterType})` : ''}`);
                 } else {
-                    await sendRekapPDF(client, message, periode, filterType, transaksi);
+                    await sendRekapPDF(sock, message, periode, filterType, transaksi);
                 }
             } catch (error) {
                 console.error('❌ Error /rekap:', error);
-                await message.reply('❌ Error saat membuat rekap PDF.');
+                await replyMessage(sock, message, '❌ Error saat membuat rekap PDF.');
             }
         } else {
             switch (cmd) {
@@ -147,7 +179,7 @@ async function handleCommand(client, message) {
                     }
 
                     balanceText += `\n💰 *Total: Rp ${totalBalance.toLocaleString('id-ID')}*`;
-                    await message.reply(balanceText);
+                    await replyMessage(sock, message, balanceText);
                     break;
 
                 case '/help':
@@ -172,12 +204,12 @@ Cukup ketik transaksi secara natural, bot akan otomatis mengenali dan menyimpan:
 
 Ketik saja dan bot akan memprosesnya secara otomatis! 🚀`;
 
-                    await message.reply(helpText);
+                    await replyMessage(sock, message, helpText);
                     break;
 
                 case '/test':
                     let testText = '🔧 *Status Bot:*\n\n';
-                    testText += '✅ WhatsApp: Connected\n';
+                    testText += '✅ WhatsApp: Connected (Baileys)\n';
 
                     try {
                         const testBalance = await sheets.getBalance('CASH');
@@ -188,7 +220,7 @@ Ketik saja dan bot akan memprosesnya secara otomatis! 🚀`;
                         testText += `Error: ${error.message}`;
                     }
 
-                    await message.reply(testText);
+                    await replyMessage(sock, message, testText);
                     break;
 
                 case '/demo':
@@ -202,7 +234,7 @@ Kirim pesan seperti:
 
 Bot akan parsing otomatis! 🚀`;
 
-                    await message.reply(demoText);
+                    await replyMessage(sock, message, demoText);
                     break;
 
                 case '/reset':
@@ -211,12 +243,12 @@ Bot akan parsing otomatis! 🚀`;
                         const reconnected = await sheets.authenticate();
 
                         if (reconnected) {
-                            await message.reply('✅ *Koneksi Google Sheets berhasil di-reset!*\n\nSekarang coba kirim transaksi lagi.');
+                            await replyMessage(sock, message, '✅ *Koneksi Google Sheets berhasil di-reset!*\n\nSekarang coba kirim transaksi lagi.');
                         } else {
-                            await message.reply('❌ *Gagal reset koneksi*\n\nPeriksa konfigurasi .env dan pastikan Google Sheet sudah di-share dengan benar.');
+                            await replyMessage(sock, message, '❌ *Gagal reset koneksi*\n\nPeriksa konfigurasi .env dan pastikan Google Sheet sudah di-share dengan benar.');
                         }
                     } catch (error) {
-                        await message.reply(`❌ *Error saat reset:* ${error.message}`);
+                        await replyMessage(sock, message, `❌ *Error saat reset:* ${error.message}`);
                     }
                     break;
 
@@ -229,6 +261,7 @@ Bot akan parsing otomatis! 🚀`;
 
                     debugText += '\n🔗 *Connection Status:*\n';
                     debugText += `• Authenticated: ${sheets.isAuthenticated ? '✅ Yes' : '❌ No'}\n`;
+                    debugText += `• Library: Baileys (WhiskeySockets)\n`;
 
                     if (sheets.isAuthenticated && sheets.doc) {
                         debugText += `• Document Title: ${sheets.doc.title || 'Unknown'}\n`;
@@ -243,14 +276,14 @@ Bot akan parsing otomatis! 🚀`;
                     debugText += `• RSS: ${Math.round(memUsage.rss / 1024 / 1024)} MB\n`;
                     debugText += `• Heap Used: ${Math.round(memUsage.heapUsed / 1024 / 1024)} MB\n`;
 
-                    await message.reply(debugText);
+                    await replyMessage(sock, message, debugText);
                     break;
 
                 case '/config':
                     let configText = '⚙️ *Bot Configuration:*\n\n';
                     configText += '📋 *Current Settings:*\n';
                     configText += `• Sheet ID: ${process.env.GOOGLE_SHEET_ID ? process.env.GOOGLE_SHEET_ID.substring(0, 15) + '...' : 'Not set'}\n`;
-                    configText += `• Session Name: ${process.env.SESSION_NAME || 'whatsapp-finance'}\n`;
+                    configText += `• WhatsApp Library: Baileys\n`;
                     configText += `• Service Email: ${process.env.GOOGLE_SERVICE_EMAIL ? process.env.GOOGLE_SERVICE_EMAIL.split('@')[0] + '@...' : 'Not set'}\n`;
 
                     configText += '\n🎯 *Supported Features:*\n';
@@ -260,20 +293,20 @@ Bot akan parsing otomatis! 🚀`;
                     configText += '• ✅ Category & Subcategory Recognition\n';
                     configText += `• ${sheets.isAuthenticated ? '✅' : '❌'} Google Sheets Integration\n`;
 
-                    await message.reply(configText);
+                    await replyMessage(sock, message, configText);
                     break;
 
                 default:
-                    await message.reply('❓ Command tidak dikenal. Ketik */help* untuk bantuan.');
+                    await replyMessage(sock, message, '❓ Command tidak dikenal. Ketik */help* untuk bantuan.');
             }
         }
     } catch (error) {
         console.error('❌ Error handling command:', error);
-        await message.reply('❌ Error menjalankan command.');
+        await replyMessage(sock, message, '❌ Error menjalankan command.');
     }
 }
 
-async function sendRekapPDF(client, message, periode, type, transaksi) {
+async function sendRekapPDF(sock, message, periode, type, transaksi) {
     const doc = new PDFDocument({
         size: 'A4',
         margin: 30,
