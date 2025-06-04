@@ -2,10 +2,10 @@
   "name": "whatsapp-finance-bot",
   "version": "2.0.0",
   "description": "WhatsApp Finance Bot with Natural Language Processing",
-  "main": "node src/bot/index.js",
+  "main": "src/bot/index.js",
   "scripts": {
     "start": "node src/bot/index.js",
-    "dev": "nodemon index.js",
+    "dev": "nodemon src/bot/index.js",
     "test": "node test.js"
   },
   "keywords": [
@@ -18,14 +18,14 @@
   "author": "Your Name",
   "license": "MIT",
   "dependencies": {
+    "@whiskeysockets/baileys": "^6.5.0",
+    "@hapi/boom": "^10.0.1",
     "@google/generative-ai": "^0.24.1",
     "dotenv": "^16.5.0",
     "google-auth-library": "^9.15.1",
     "google-spreadsheet": "^3.3.0",
     "pdfkit": "^0.17.1",
-    "qrcode-terminal": "^0.12.0",
-    "whatsapp-web.js": "^1.23.0",
-    "puppeteer": "^22.0.0"
+    "qrcode-terminal": "^0.12.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
