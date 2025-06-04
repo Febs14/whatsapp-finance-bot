@@ -4,7 +4,19 @@ const { handleMessage } = require('../handlers');
 const { SESSION_NAME } = require('../config');
 
 const client = new Client({
-  authStrategy: new LocalAuth({ clientId: SESSION_NAME })
+  authStrategy: new LocalAuth({ clientId: SESSION_NAME }),
+  puppeteer: {
+    headless: true,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--no-first-run',
+      '--no-zygote',
+      '--disable-gpu'
+    ]
+  }
 });
 
 client.on('qr', qr => qrcode.generate(qr, { small: true }));
